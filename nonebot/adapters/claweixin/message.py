@@ -79,10 +79,16 @@ class MessageSegment(BaseMessageSegment["Message"]):
         return LocalAttachment.voice(data, file_name, text, encode_type, bits_per_sample, sample_rate, playtime)
 
     @staticmethod
-    def file(file_name: Optional[str] = None, media: Optional[dict] = None) -> "File":
+    def file(
+        url: Optional[str] = None, 
+        file_name: Optional[str] = None,
+        media: Optional[dict] = None
+    ) -> "File":
         data = {}
         if file_name:
             data["file_name"] = file_name
+        if url:
+            data["url"] = url
         if media:
             data["media"] = media
         return File("file", data)
@@ -92,8 +98,10 @@ class MessageSegment(BaseMessageSegment["Message"]):
         return LocalAttachment.file(data, file_name)
 
     @staticmethod
-    def video(media: Optional[dict] = None) -> "Video":
+    def video(url: Optional[str] = None, media: Optional[dict] = None) -> "Video":
         data = {}
+        if url:
+            data["url"] = url
         if media:
             data["media"] = media
         return Video("video", data)
