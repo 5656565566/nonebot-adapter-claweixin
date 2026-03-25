@@ -14,10 +14,12 @@ if TYPE_CHECKING:
 
 class Bot(BaseBot):
     adapter: "Adapter"  # type: ignore
+    token: str
 
     @override
-    def __init__(self, adapter: "Adapter", self_id: str, **kwargs: Any):
+    def __init__(self, adapter: "Adapter", self_id: str, token: str = "", **kwargs: Any):
         super().__init__(adapter, self_id, **kwargs)
+        self.token = token
 
     def __getattr__(self, item: str) -> Any:
         raise NotImplementedError(f"API {item} is not supported")
