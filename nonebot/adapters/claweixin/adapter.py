@@ -58,15 +58,17 @@ class Adapter(BaseAdapter):
         api_root = getattr(self.claweixin_config, "claweixin_api_root", "https://ilinkai.weixin.qq.com")
         qrcode_in_info = getattr(self.claweixin_config, "claweixin_login_qrcode_in_info", False)
 
-        if not tokens:
-            login_result = await login_flow(
-                cast(HTTPClientMixin, self.driver),
-                api_root,
-                qrcode_in_info=qrcode_in_info,
-            )
-            if not login_result:
-                raise RuntimeError("ClaWeixin login flow finished without token")
+        
+        login_result = await login_flow(
+            cast(HTTPClientMixin, self.driver),
+            api_root,
+            qrcode_in_info=qrcode_in_info,
+        )
+
+        if login_result: # 加一个临时登陆使用
             tokens = [login_result["bot_token"]]
+        else:
+            log("WARNING", "ClaWeixin login flow finished without token")
 
         for index, token in enumerate(tokens, start=1):
             bot = Bot(self, f"claweixin_bot_{index}", token=token)

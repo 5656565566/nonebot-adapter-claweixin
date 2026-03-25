@@ -27,9 +27,11 @@ async def _request_json(
 ) -> dict[str, Any]:
     try:
         response = await driver.request(request)
-    except TimeoutError:
-        if read_timeout_as_wait:
-            return {"status": "wait"}
+    except Exception as e:
+        error_name = e.__class__.__name__
+        if "Timeout" in error_name or isinstance(e, TimeoutError):
+            if read_timeout_as_wait:
+                return {"status": "wait"}
         raise
 
     if not (200 <= response.status_code < 300):
@@ -152,7 +154,7 @@ async def login_flow(
             if not bot_token:
                 raise LoginError("登录成功但接口未返回 bot_token")
 
-            log("INFO", "登录成功，请将以下配置写入环境变量")
+            log("INFO", "登录成功，如需持久化使用请将以下配置写入环境变量")
             log("INFO", f'CLAWEIXIN_TOKEN=["{bot_token}"]')
             # log("INFO", f'CLAWEIXIN_API_ROOT="{resolved_api_root}"')
             return {
@@ -166,3 +168,4 @@ async def login_flow(
 
 if __name__ == "__main__":
     raise SystemExit("请在 nonebot 适配器初始化流程中调用 login_flow 而不是直接运行该模块")
+
