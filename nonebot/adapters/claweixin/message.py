@@ -126,6 +126,10 @@ class MessageSegment(BaseMessageSegment["Message"]):
             segment_data["media"] = media
         return Video("video", segment_data)
 
+    @staticmethod
+    def reply(ref_msg: dict[str, Any]) -> "Reply":
+        return Reply("reply", {"ref_msg": ref_msg})
+
 
 def _normalize_media_input(data: Union[bytes, BytesIO, Path, None]) -> tuple[bytes, Optional[str]] | None:
     if data is None:
@@ -167,6 +171,12 @@ class Video(MessageSegment):
         return "[视频]"
 
 
+class Reply(MessageSegment):
+    @override
+    def __str__(self) -> str:
+        return "[回复]"
+
+
 class Message(BaseMessage[MessageSegment]):
     """
     ClaWeixin 协议 Message 适配
@@ -203,6 +213,9 @@ class Message(BaseMessage[MessageSegment]):
         media_payload = media_data
         media_file_name = file_name
         for item in items:
+            if "ref_msg" in item:
+                msg.append(MessageSegment.reply(item["ref_msg"]))
+
             item_type = item.get("type")
             if item_type == 1 and "text_item" in item:
                 msg.append(MessageSegment.text(item["text_item"].get("text", "")))

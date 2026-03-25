@@ -4,7 +4,7 @@ from typing_extensions import override
 from nonebot.message import handle_event
 from nonebot.adapters import Bot as BaseBot
 
-from .event import Event, MessageEvent
+from .event import Event, MessageEvent, Reply
 from .message import Message, MessageSegment
 from .utils import log
 
@@ -45,9 +45,26 @@ class Bot(BaseBot):
     async def handle_event(self, event: Event):
         log("DEBUG", f"Bot {self.self_id} handling event: {event.get_event_name()}")
         if isinstance(event, MessageEvent):
+            self._check_reply(event)
             self._check_at_me(event)
             self._check_nickname(event)
         await handle_event(self, event)
+
+    def _check_reply(self, event: MessageEvent):
+        if not hasattr(event, "message"):
+            return
+        msg = event.message
+        if not msg:
+            return
+        
+        reply_segment = None
+        for i, segment in enumerate(msg):
+            if segment.type == "reply":
+                reply_segment = msg.pop(i)
+                break
+                
+        if reply_segment:
+            event.reply = Reply(ref_msg=reply_segment.data.get("ref_msg", {}))
 
     def _check_at_me(self, event: MessageEvent): # 个人对话场景 to_me 保持为 True
         event.to_me = True

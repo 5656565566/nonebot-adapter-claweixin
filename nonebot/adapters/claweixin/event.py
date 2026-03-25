@@ -3,11 +3,24 @@ from copy import deepcopy
 from typing import Any, Optional, List, Dict
 from typing_extensions import override
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 from nonebot.adapters import Event as BaseEvent
 from nonebot.compat import model_dump
 
 from .message import Message
+
+
+class Reply(BaseModel):
+    ref_msg: dict[str, Any]
+
+    @property
+    def message(self) -> Message:
+        """尝试将包含的回复信息解析为 Message"""
+        item = self.ref_msg.get("message_item", {})
+        return Message.from_message_items([item])
+
+    async def get_origin(self) -> dict[str, Any]:
+        return self.ref_msg
 
 
 class Event(BaseEvent):
