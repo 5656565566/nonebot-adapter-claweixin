@@ -139,8 +139,8 @@ async def login_flow(
                 raise LoginError("登录成功但接口未返回 bot_token")
 
             log("INFO", "登录成功，请将以下配置写入环境变量")
-            log("INFO", f'CLAWEIXIN_TOKEN="{bot_token}"')
-            log("INFO", f'CLAWEIXIN_API_ROOT="{resolved_api_root}"')
+            log("INFO", f'CLAWEIXIN_TOKEN=["{bot_token}"]')
+            # log("INFO", f'CLAWEIXIN_API_ROOT="{resolved_api_root}"')
             return {
                 "bot_id": bot_id,
                 "bot_token": bot_token,

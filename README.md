@@ -32,11 +32,19 @@ DRIVER=~httpx
 
 ### 配置机器人
 
-配置连接配置，如：
+配置环境变量：
 
 ```dotenv
-
+claweixin_login_qrcode_in_info=true
 ```
+
+这个环境变量会在机器人启动时获取登陆二维码，然后扫描对应二维码（可以通过访问链接/或者安装qrcode）终端扫描）
+
+然后根据日志提示添加 token 可以是多个
+```dotenv
+CLAWEIXIN_TOKEN=["xxx"]
+```
+
 
 ## 相关项目
 
