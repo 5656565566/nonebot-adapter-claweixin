@@ -1,12 +1,14 @@
-from nonebot.utils import logger_wrapper
-
 import random
 import base64
+
+from typing import Optional
+
+from nonebot.utils import logger_wrapper
 
 log = logger_wrapper("ClaWeixin Adapter")
 
 
-def make_headers(token=None):
+def make_headers(token: Optional[str] = None) -> dict[str, str]:
     uin = str(random.randint(0, 0xFFFFFFFF))
     headers = {
         "Content-Type": "application/json",

@@ -1,10 +1,11 @@
-from typing import Any, Optional, Dict, TYPE_CHECKING, cast
-from typing_extensions import override
 import json
 import asyncio
 import datetime
 import traceback
 import random
+
+from typing import Any, Optional, Dict, TYPE_CHECKING, cast
+from typing_extensions import override
 
 from nonebot import get_plugin_config
 from nonebot.drivers import Driver, Request, HTTPClientMixin
@@ -47,16 +48,13 @@ class Adapter(BaseAdapter):
         self.driver.on_shutdown(self._shutdown)
 
     def _get_tokens(self) -> list[str]:
-        tokens = getattr(self.claweixin_config, "claweixin_token", [])
-        if isinstance(tokens, str):
-            return [tokens] if tokens else []
-        return [token for token in tokens if token]
+        return [token for token in self.claweixin_config.claweixin_token if token]
 
     async def _startup(self) -> None:
         log("DEBUG", "Starting ClaWeixin adapter...")
         tokens = self._get_tokens()
-        api_root = getattr(self.claweixin_config, "claweixin_api_root", "https://ilinkai.weixin.qq.com")
-        qrcode_in_info = getattr(self.claweixin_config, "claweixin_login_qrcode_in_info", False)
+        api_root = self.claweixin_config.claweixin_api_root
+        qrcode_in_info = self.claweixin_config.claweixin_login_qrcode_in_info
 
         
         login_result = await login_flow(
@@ -85,7 +83,7 @@ class Adapter(BaseAdapter):
             self.bot_disconnect(bot)
 
     async def _poll_updates(self, bot: Bot, token: str) -> None:
-        api_root = getattr(self.claweixin_config, "claweixin_api_root", "https://ilinkai.weixin.qq.com")
+        api_root = self.claweixin_config.claweixin_api_root
         get_updates_buf = ""
 
         log("DEBUG", f"Start long polling for bot {bot.self_id} at {api_root}")
@@ -105,7 +103,7 @@ class Adapter(BaseAdapter):
                 )
                 log("DEBUG", f"Sending getupdates request with buf length: {len(get_updates_buf)}")
 
-                start_time = asyncio.get_event_loop().time()
+                start_time = asyncio.get_running_loop().time()
                 response = await self.request(request)
 
                 if response.status_code == 200 and response.content:
@@ -164,7 +162,7 @@ class Adapter(BaseAdapter):
                     log("WARNING", f"getUpdates failed with HTTP status {response.status_code}")
                     await asyncio.sleep(5)
 
-                if asyncio.get_event_loop().time() - start_time < 1.0:
+                if asyncio.get_running_loop().time() - start_time < 1.0:
                     await asyncio.sleep(1)
 
             except asyncio.CancelledError:
@@ -199,8 +197,8 @@ class Adapter(BaseAdapter):
 
     @override
     async def _call_api(self, bot: Bot, api: str, **data: Any) -> Any:  # type: ignore
-        api_root = getattr(self.claweixin_config, "claweixin_api_root", "https://ilinkai.weixin.qq.com")
-        token = getattr(bot, "token", "")
+        api_root = self.claweixin_config.claweixin_api_root
+        token = bot.token
         headers = make_headers(token)
 
         log("DEBUG", f"Calling API: {api} with data: {data}")
@@ -230,6 +228,10 @@ class Adapter(BaseAdapter):
 
             client_id = f"openclaw-weixin-{random.randint(0, 0xFFFFFFFF):08x}"
             to_user_id = data.get("to_user_id")
+            if not to_user_id:
+                log("ERROR", "Missing to_user_id in send_message")
+                raise ValueError("to_user_id is required")
+
             payload = {
                 "msg": {
                     "from_user_id": "",
@@ -249,9 +251,6 @@ class Adapter(BaseAdapter):
                 headers=headers,
                 json=payload,
             )
-            if not to_user_id:
-                log("ERROR", "Missing to_user_id in send_message")
-                raise ValueError("to_user_id is required")
         else:
             raise NotImplementedError(f"API {api} is not implemented")
 

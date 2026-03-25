@@ -141,9 +141,7 @@ async def login_flow(
             continue
         if status == "scaned":
             log("INFO", "二维码已扫码，请在手机上确认登录")
-            start_time = time.time()
-            if time.time() - start_time < max_wait:
-                await asyncio.sleep(2)
+            await asyncio.sleep(2)
             continue
         
         if status == "expired":
