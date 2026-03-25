@@ -195,7 +195,7 @@ class Adapter(BaseAdapter):
         api_root = self.claweixin_config.claweixin_api_root
         token = bot.token
 
-        log("DEBUG", f"Calling API: {api} with data: {data}")
+        log("DEBUG", f"Calling API: {api} with data keys: {list(data.keys())}")
 
         if api != "send_message":
             raise NotImplementedError(f"API {api} is not implemented")

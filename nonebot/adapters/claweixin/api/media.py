@@ -1,12 +1,11 @@
-import mimetypes
 import hashlib
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Optional
 
 from nonebot.drivers import HTTPClientMixin
 
 from .cdn.download import download_and_decrypt_buffer, download_plain_cdn_buffer
+from .mime import get_mime_type
 
 MESSAGE_ITEM_TYPE_IMAGE = 2
 MESSAGE_ITEM_TYPE_VOICE = 3
@@ -44,10 +43,20 @@ async def download_media_from_item(
             if aes_key
             else await download_plain_cdn_buffer(driver, str(encrypted_query_param), cdn_base_url)
         )
+        mime_type = get_mime_type(payload)
+        suffix = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/gif": ".gif",
+            "image/bmp": ".bmp",
+            "image/x-icon": ".ico",
+            "image/tiff": ".tiff",
+            "image/pcx": ".pcx",
+        }.get(mime_type, ".bin")
         file_id = hashlib.md5(payload).hexdigest()
-        result.file_name = f"image-{file_id}"
+        result.file_name = f"image-{file_id}{suffix}"
         result.media_data = payload
-        result.media_type = "image/*"
+        result.media_type = mime_type
         return result
 
     if item_type == MESSAGE_ITEM_TYPE_VOICE:
@@ -73,11 +82,35 @@ async def download_media_from_item(
         if not encrypted_query_param or not aes_key:
             return result
         payload = await download_and_decrypt_buffer(driver, str(encrypted_query_param), str(aes_key), cdn_base_url)
-        suffix = Path(file_name).suffix or ".bin"
+        mime_type = get_mime_type(payload)
+        suffix = {
+            "application/pdf": ".pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+            "application/zip": ".zip",
+            "application/vnd.ms-office": ".doc",
+            "application/rtf": ".rtf",
+            "application/gzip": ".gz",
+            "application/x-bzip2": ".bz2",
+            "application/x-xz": ".xz",
+            "application/vnd.rar": ".rar",
+            "application/x-7z-compressed": ".7z",
+            "application/x-msdownload": ".exe",
+            "application/x-executable": ".elf",
+            "application/xml": ".xml",
+            "text/html": ".html",
+            "text/plain": ".txt",
+            "application/x-font-ttf": ".ttf",
+            "application/x-font": ".fon",
+            "application/octet-stream": ".bin",
+        }.get(mime_type)
+        if suffix is None:
+            suffix = ".bin"
         file_id = hashlib.md5(payload).hexdigest()
         result.file_name = f"{file_id}{suffix}"
         result.media_data = payload
-        result.media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+        result.media_type = mime_type
         return result
 
     if item_type == MESSAGE_ITEM_TYPE_VIDEO:

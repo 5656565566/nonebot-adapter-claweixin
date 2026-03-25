@@ -1,4 +1,6 @@
-from typing import Type, Iterable, Optional
+from io import BytesIO
+from pathlib import Path
+from typing import Any, Type, Iterable, Optional, Union
 from typing_extensions import override
 
 from nonebot.adapters import Message as BaseMessage, MessageSegment as BaseMessageSegment
@@ -8,6 +10,7 @@ class MessageSegment(BaseMessageSegment["Message"]):
     """
     ClaWeixin 协议 MessageSegment 适配
     依据 OpenClaw WeChat 协议定义 支持 TEXT, IMAGE, VOICE, FILE, VIDEO 等
+    同时支持本地二进制媒体段 IMAGE_FILE, VOICE_FILE, FILE_FILE, VIDEO_FILE
     """
 
     @classmethod
@@ -41,6 +44,10 @@ class MessageSegment(BaseMessageSegment["Message"]):
         return Image("image", data)
 
     @staticmethod
+    def image_file(data: Union[bytes, BytesIO, Path], file_name: Optional[str] = None) -> "LocalAttachment":
+        return LocalAttachment.image(data, file_name)
+
+    @staticmethod
     def voice(text: Optional[str] = None, media: Optional[dict] = None) -> "Voice":
         data = {}
         if text:
@@ -48,6 +55,18 @@ class MessageSegment(BaseMessageSegment["Message"]):
         if media:
             data["media"] = media
         return Voice("voice", data)
+
+    @staticmethod
+    def voice_file(
+        data: Union[bytes, BytesIO, Path],
+        file_name: Optional[str] = None,
+        text: Optional[str] = None,
+        encode_type: int = 6,
+        bits_per_sample: Optional[int] = None,
+        sample_rate: Optional[int] = None,
+        playtime: Optional[int] = None,
+    ) -> "LocalAttachment":
+        return LocalAttachment.voice(data, file_name, text, encode_type, bits_per_sample, sample_rate, playtime)
 
     @staticmethod
     def file(file_name: Optional[str] = None, media: Optional[dict] = None) -> "File":
@@ -59,11 +78,19 @@ class MessageSegment(BaseMessageSegment["Message"]):
         return File("file", data)
 
     @staticmethod
+    def file_file(data: Union[bytes, BytesIO, Path], file_name: Optional[str] = None) -> "LocalAttachment":
+        return LocalAttachment.file(data, file_name)
+
+    @staticmethod
     def video(media: Optional[dict] = None) -> "Video":
         data = {}
         if media:
             data["media"] = media
         return Video("video", data)
+
+    @staticmethod
+    def video_file(data: Union[bytes, BytesIO, Path], file_name: Optional[str] = None) -> "LocalAttachment":
+        return LocalAttachment.video(data, file_name)
 
 
 class Text(MessageSegment):
@@ -94,6 +121,62 @@ class Video(MessageSegment):
     @override
     def __str__(self) -> str:
         return "[视频]"
+
+
+class LocalAttachment(MessageSegment):
+    @staticmethod
+    def _build(type_: str, data: Union[bytes, BytesIO, Path], file_name: Optional[str] = None, text: Optional[str] = None) -> "LocalAttachment":
+        payload: Union[bytes, Path] = data.getvalue() if isinstance(data, BytesIO) else data
+        file_data: dict[str, Any] = {"data": payload}
+        if file_name:
+            file_data["file_name"] = file_name
+        elif isinstance(data, Path):
+            file_data["file_name"] = data.name
+        if text:
+            file_data["text"] = text
+        return LocalAttachment(type_, file_data)
+
+    @staticmethod
+    def image(data: Union[bytes, BytesIO, Path], file_name: Optional[str] = None) -> "LocalAttachment":
+        return LocalAttachment._build("image_file", data, file_name)
+
+    @staticmethod
+    def voice(
+        data: Union[bytes, BytesIO, Path],
+        file_name: Optional[str] = None,
+        text: Optional[str] = None,
+        encode_type: int = 6,
+        bits_per_sample: Optional[int] = None,
+        sample_rate: Optional[int] = None,
+        playtime: Optional[int] = None,
+    ) -> "LocalAttachment":
+        attachment = LocalAttachment._build("voice_file", data, file_name, text)
+        attachment.data["encode_type"] = encode_type
+        if bits_per_sample is not None:
+            attachment.data["bits_per_sample"] = bits_per_sample
+        if sample_rate is not None:
+            attachment.data["sample_rate"] = sample_rate
+        if playtime is not None:
+            attachment.data["playtime"] = playtime
+        return attachment
+
+    @staticmethod
+    def file(data: Union[bytes, BytesIO, Path], file_name: Optional[str] = None) -> "LocalAttachment":
+        return LocalAttachment._build("file_file", data, file_name)
+
+    @staticmethod
+    def video(data: Union[bytes, BytesIO, Path], file_name: Optional[str] = None) -> "LocalAttachment":
+        return LocalAttachment._build("video_file", data, file_name)
+
+    @override
+    def __str__(self) -> str:
+        if self.type == "image_file":
+            return "[待发送的图片]"
+        if self.type == "voice_file":
+            return "[待发送的语音]"
+        if self.type == "video_file":
+            return "[待发送的视频]"
+        return "[待发送的文件]"
 
 
 class Message(BaseMessage[MessageSegment]):
