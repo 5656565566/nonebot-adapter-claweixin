@@ -123,7 +123,7 @@ async def send_media_item(
 
 
 def _base64_from_hex(hex_value: str) -> str:
-    return base64.b64encode(bytes.fromhex(hex_value)).decode()
+    return base64.b64encode(hex_value.encode()).decode()
 
 
 def build_image_item(uploaded: UploadedFileInfo) -> dict[str, Any]:
@@ -135,7 +135,7 @@ def build_image_item(uploaded: UploadedFileInfo) -> dict[str, Any]:
                 "aes_key": _base64_from_hex(uploaded.aeskey),
                 "encrypt_type": 1,
             },
-            "mid_size": uploaded.file_size_ciphertext,
+            "mid_size": uploaded.file_size,
         },
     }
 
@@ -150,7 +150,7 @@ def build_video_item(uploaded: UploadedFileInfo) -> dict[str, Any]:
                 "aes_key": _base64_from_hex(uploaded.aeskey),
                 "encrypt_type": 1,
             },
-            "video_size": uploaded.file_size_ciphertext,
+            "video_size": uploaded.file_size,
         },
     }
 

@@ -6,7 +6,6 @@ from typing import Any, Optional
 from nonebot.drivers import HTTPClientMixin, Request, Response
 
 from ..exception import ActionFailed, NetworkError
-from ..utils import log
 
 DEFAULT_LONG_POLL_TIMEOUT = 35.0
 DEFAULT_API_TIMEOUT = 15.0
