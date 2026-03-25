@@ -2,7 +2,6 @@ import hashlib
 import os
 import secrets
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
@@ -61,11 +60,11 @@ async def upload_media_to_cdn(
     api_root: str,
     token: str,
     cdn_base_url: str,
-    file_path: str,
+    payload: bytes,
     to_user_id: str,
     media_type: int,
 ) -> UploadedFileInfo:
-    plaintext = Path(file_path).read_bytes()
+    plaintext = payload
     rawsize = len(plaintext)
     rawfilemd5 = hashlib.md5(plaintext).hexdigest()
     filesize = aes_ecb_padded_size(rawsize)

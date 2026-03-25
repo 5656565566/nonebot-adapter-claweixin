@@ -33,7 +33,11 @@ class MessageSegment(BaseMessageSegment["Message"]):
         return Text("text", {"text": text})
 
     @staticmethod
-    def image(url: Optional[str] = None, media: Optional[dict] = None, aeskey: Optional[str] = None) -> "Image":
+    def image(
+        url: Optional[str] = None,
+        media: Optional[dict] = None,
+        aeskey: Optional[str] = None
+    ) -> "Image":
         data = {}
         if url:
             data["url"] = url
@@ -48,8 +52,14 @@ class MessageSegment(BaseMessageSegment["Message"]):
         return LocalAttachment.image(data, file_name)
 
     @staticmethod
-    def voice(text: Optional[str] = None, media: Optional[dict] = None) -> "Voice":
+    def voice(
+        url: Optional[str] = None,
+        text: Optional[str] = None,
+        media: Optional[dict] = None,
+    ) -> "Voice":
         data = {}
+        if url:
+            data["url"] = url
         if text:
             data["text"] = text
         if media:
@@ -104,7 +114,6 @@ class Image(MessageSegment):
     def __str__(self) -> str:
         return "[图片]"
 
-
 class Voice(MessageSegment):
     @override
     def __str__(self) -> str:
@@ -126,12 +135,20 @@ class Video(MessageSegment):
 class LocalAttachment(MessageSegment):
     @staticmethod
     def _build(type_: str, data: Union[bytes, BytesIO, Path], file_name: Optional[str] = None, text: Optional[str] = None) -> "LocalAttachment":
-        payload: Union[bytes, Path] = data.getvalue() if isinstance(data, BytesIO) else data
-        file_data: dict[str, Any] = {"data": payload}
+        payload: bytes
+        inferred_file_name: Optional[str] = None
+        if isinstance(data, BytesIO):
+            payload = data.getvalue()
+        elif isinstance(data, Path):
+            payload = data.read_bytes()
+            inferred_file_name = data.name
+        else:
+            payload = data
+        file_data: dict[str, Any] = {"content": payload}
         if file_name:
             file_data["file_name"] = file_name
-        elif isinstance(data, Path):
-            file_data["file_name"] = data.name
+        elif inferred_file_name:
+            file_data["file_name"] = inferred_file_name
         if text:
             file_data["text"] = text
         return LocalAttachment(type_, file_data)

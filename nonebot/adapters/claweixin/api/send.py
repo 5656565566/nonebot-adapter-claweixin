@@ -1,7 +1,6 @@
 import base64
 import mimetypes
 import os
-import tempfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable
@@ -30,7 +29,7 @@ def generate_client_id() -> str:
     return f"claweixin-{os.urandom(8).hex()}"
 
 
-async def download_remote_media(driver: HTTPClientMixin, url: str) -> str:
+async def download_remote_media(driver: HTTPClientMixin, url: str) -> tuple[bytes, str | None]:
     parsed = urlparse(url)
     suffix = Path(parsed.path).suffix or ".bin"
     request = Request(method="GET", url=url, timeout=60.0)
@@ -47,16 +46,7 @@ async def download_remote_media(driver: HTTPClientMixin, url: str) -> str:
         payload = content.encode()
     else:
         payload = content
-    fd, file_path = tempfile.mkstemp(prefix="claweixin-media-", suffix=suffix)
-    os.close(fd)
-    Path(file_path).write_bytes(payload)
-    return file_path
-
-
-async def ensure_local_file(driver: HTTPClientMixin, media_value: str) -> tuple[str, bool]:
-    if "://" in media_value:
-        return await download_remote_media(driver, media_value), True
-    return media_value, False
+    return payload, Path(parsed.path).name or f"remote-media{suffix}"
 
 
 async def send_text_message(
@@ -171,7 +161,14 @@ def build_file_item(uploaded: UploadedFileInfo, file_name: str) -> dict[str, Any
     }
 
 
-def build_voice_item(uploaded: UploadedFileInfo, text: str = "") -> dict[str, Any]:
+def build_voice_item(
+    uploaded: UploadedFileInfo,
+    text: str = "",
+    encode_type: int | None = None,
+    bits_per_sample: int | None = None,
+    sample_rate: int | None = None,
+    playtime: int | None = None,
+) -> dict[str, Any]:
     voice_item: dict[str, Any] = {
         "type": MESSAGE_ITEM_TYPE_VOICE,
         "voice_item": {
@@ -184,6 +181,14 @@ def build_voice_item(uploaded: UploadedFileInfo, text: str = "") -> dict[str, An
     }
     if text:
         voice_item["voice_item"]["text"] = text
+    if encode_type is not None:
+        voice_item["voice_item"]["encode_type"] = encode_type
+    if bits_per_sample is not None:
+        voice_item["voice_item"]["bits_per_sample"] = bits_per_sample
+    if sample_rate is not None:
+        voice_item["voice_item"]["sample_rate"] = sample_rate
+    if playtime is not None:
+        voice_item["voice_item"]["playtime"] = playtime
     return voice_item
 
 
@@ -193,6 +198,17 @@ def normalize_binary_file(data: bytes | BytesIO | Path) -> tuple[bytes, str | No
     if isinstance(data, BytesIO):
         return data.getvalue(), None
     return data.read_bytes(), data.name
+
+
+def infer_media_kind(file_name: str | None, mime_type: str | None, *, force_voice: bool = False) -> str:
+    if force_voice:
+        return "voice_file"
+    mime = mime_type or (mimetypes.guess_type(file_name or "")[0] if file_name else None) or "application/octet-stream"
+    if mime.startswith("image/"):
+        return "image_file"
+    if mime.startswith("video/"):
+        return "video_file"
+    return "file_file"
 
 
 async def send_media_file(
@@ -205,91 +221,28 @@ async def send_media_file(
     context_token: str | None,
     file_path: str,
     text: str = "",
+    force_voice: bool = False,
+    encode_type: int | None = None,
+    bits_per_sample: int | None = None,
+    sample_rate: int | None = None,
+    playtime: int | None = None,
 ) -> str:
-    mime, _ = mimetypes.guess_type(file_path)
-    mime = mime or "application/octet-stream"
-
-    if mime.startswith("image/"):
-        uploaded = await upload_media_to_cdn(
-            driver=driver,
-            api_root=api_root,
-            token=token,
-            cdn_base_url=cdn_base_url,
-            file_path=file_path,
-            to_user_id=to_user_id,
-            media_type=UPLOAD_MEDIA_TYPE_IMAGE,
-        )
-        if text:
-            await send_text_message(
-                driver,
-                api_root=api_root,
-                token=token,
-                to_user_id=to_user_id,
-                context_token=context_token,
-                text=text,
-            )
-        return await send_media_item(
-            driver,
-            api_root=api_root,
-            token=token,
-            to_user_id=to_user_id,
-            context_token=context_token,
-            media_item=build_image_item(uploaded),
-        )
-
-    if mime.startswith("video/"):
-        uploaded = await upload_media_to_cdn(
-            driver=driver,
-            api_root=api_root,
-            token=token,
-            cdn_base_url=cdn_base_url,
-            file_path=file_path,
-            to_user_id=to_user_id,
-            media_type=UPLOAD_MEDIA_TYPE_VIDEO,
-        )
-        if text:
-            await send_text_message(
-                driver,
-                api_root=api_root,
-                token=token,
-                to_user_id=to_user_id,
-                context_token=context_token,
-                text=text,
-            )
-        return await send_media_item(
-            driver,
-            api_root=api_root,
-            token=token,
-            to_user_id=to_user_id,
-            context_token=context_token,
-            media_item=build_video_item(uploaded),
-        )
-
-    uploaded = await upload_media_to_cdn(
-        driver=driver,
-        api_root=api_root,
-        token=token,
-        cdn_base_url=cdn_base_url,
-        file_path=file_path,
-        to_user_id=to_user_id,
-        media_type=UPLOAD_MEDIA_TYPE_FILE,
-    )
-    if text:
-        await send_text_message(
-            driver,
-            api_root=api_root,
-            token=token,
-            to_user_id=to_user_id,
-            context_token=context_token,
-            text=text,
-        )
-    return await send_media_item(
+    payload = Path(file_path).read_bytes()
+    return await send_binary_file(
         driver,
         api_root=api_root,
         token=token,
+        cdn_base_url=cdn_base_url,
         to_user_id=to_user_id,
         context_token=context_token,
-        media_item=build_file_item(uploaded, Path(file_path).name),
+        data=payload,
+        media_kind=infer_media_kind(file_path, None, force_voice=force_voice),
+        file_name=Path(file_path).name,
+        text=text,
+        encode_type=encode_type,
+        bits_per_sample=bits_per_sample,
+        sample_rate=sample_rate,
+        playtime=playtime,
     )
 
 
@@ -305,6 +258,10 @@ async def send_binary_file(
     media_kind: str,
     file_name: str | None = None,
     text: str = "",
+    encode_type: int | None = None,
+    bits_per_sample: int | None = None,
+    sample_rate: int | None = None,
+    playtime: int | None = None,
 ) -> str:
     payload, inferred_file_name = normalize_binary_file(data)
     default_name = {
@@ -315,78 +272,75 @@ async def send_binary_file(
     }.get(media_kind, "file.bin")
     actual_file_name = file_name or inferred_file_name or default_name
 
-    fd, file_path = tempfile.mkstemp(prefix="claweixin-file-", suffix=Path(actual_file_name).suffix or ".bin")
-    os.close(fd)
-    temp_path = Path(file_path)
-    try:
-        temp_path.write_bytes(payload)
-        if media_kind == "image_file":
-            uploaded = await upload_media_to_cdn(
-                driver=driver,
-                api_root=api_root,
-                token=token,
-                cdn_base_url=cdn_base_url,
-                file_path=file_path,
-                to_user_id=to_user_id,
-                media_type=UPLOAD_MEDIA_TYPE_IMAGE,
-            )
-            media_item = build_image_item(uploaded)
-        elif media_kind == "voice_file":
-            uploaded = await upload_media_to_cdn(
-                driver=driver,
-                api_root=api_root,
-                token=token,
-                cdn_base_url=cdn_base_url,
-                file_path=file_path,
-                to_user_id=to_user_id,
-                media_type=UPLOAD_MEDIA_TYPE_VOICE,
-            )
-            media_item = build_voice_item(uploaded, text)
-        elif media_kind == "video_file":
-            uploaded = await upload_media_to_cdn(
-                driver=driver,
-                api_root=api_root,
-                token=token,
-                cdn_base_url=cdn_base_url,
-                file_path=file_path,
-                to_user_id=to_user_id,
-                media_type=UPLOAD_MEDIA_TYPE_VIDEO,
-            )
-            media_item = build_video_item(uploaded)
-        else:
-            uploaded = await upload_media_to_cdn(
-                driver=driver,
-                api_root=api_root,
-                token=token,
-                cdn_base_url=cdn_base_url,
-                file_path=file_path,
-                to_user_id=to_user_id,
-                media_type=UPLOAD_MEDIA_TYPE_FILE,
-            )
-            media_item = build_file_item(uploaded, actual_file_name)
+    if media_kind == "image_file":
+        uploaded = await upload_media_to_cdn(
+            driver=driver,
+            api_root=api_root,
+            token=token,
+            cdn_base_url=cdn_base_url,
+            payload=payload,
+            to_user_id=to_user_id,
+            media_type=UPLOAD_MEDIA_TYPE_IMAGE,
+        )
+        media_item = build_image_item(uploaded)
+    elif media_kind == "voice_file":
+        uploaded = await upload_media_to_cdn(
+            driver=driver,
+            api_root=api_root,
+            token=token,
+            cdn_base_url=cdn_base_url,
+            payload=payload,
+            to_user_id=to_user_id,
+            media_type=UPLOAD_MEDIA_TYPE_VOICE,
+        )
+        media_item = build_voice_item(
+            uploaded,
+            text,
+            encode_type=encode_type,
+            bits_per_sample=bits_per_sample,
+            sample_rate=sample_rate,
+            playtime=playtime,
+        )
+    elif media_kind == "video_file":
+        uploaded = await upload_media_to_cdn(
+            driver=driver,
+            api_root=api_root,
+            token=token,
+            cdn_base_url=cdn_base_url,
+            payload=payload,
+            to_user_id=to_user_id,
+            media_type=UPLOAD_MEDIA_TYPE_VIDEO,
+        )
+        media_item = build_video_item(uploaded)
+    else:
+        uploaded = await upload_media_to_cdn(
+            driver=driver,
+            api_root=api_root,
+            token=token,
+            cdn_base_url=cdn_base_url,
+            payload=payload,
+            to_user_id=to_user_id,
+            media_type=UPLOAD_MEDIA_TYPE_FILE,
+        )
+        media_item = build_file_item(uploaded, actual_file_name)
 
-        if text and media_kind != "voice_file":
-            await send_text_message(
-                driver,
-                api_root=api_root,
-                token=token,
-                to_user_id=to_user_id,
-                context_token=context_token,
-                text=text,
-            )
-        return await send_media_item(
+    if text and media_kind != "voice_file":
+        await send_text_message(
             driver,
             api_root=api_root,
             token=token,
             to_user_id=to_user_id,
             context_token=context_token,
-            media_item=media_item,
+            text=text,
         )
-    finally:
-        try:
-            os.remove(file_path)
-        except OSError:
-            pass
+    return await send_media_item(
+        driver,
+        api_root=api_root,
+        token=token,
+        to_user_id=to_user_id,
+        context_token=context_token,
+        media_item=media_item,
+    )
 
 
 async def send_segments(
@@ -400,7 +354,6 @@ async def send_segments(
     segments: Iterable[Any],
 ) -> str:
     last_message_id = ""
-    temp_files: list[str] = []
     try:
         for segment in segments:
             segment_type = getattr(segment, "type", None)
@@ -425,24 +378,45 @@ async def send_segments(
                 )
                 if not media_value:
                     raise ValueError(f"{segment_type} segment missing file/path/url")
-                local_path, is_temp = await ensure_local_file(driver, media_value)
-                if is_temp:
-                    temp_files.append(local_path)
                 caption = str(data.get("text", ""))
-                last_message_id = await send_media_file(
-                    driver,
-                    api_root=api_root,
-                    token=token,
-                    cdn_base_url=cdn_base_url,
-                    to_user_id=to_user_id,
-                    context_token=context_token,
-                    file_path=local_path,
-                    text=caption,
-                )
+                if "://" in media_value:
+                    remote_payload, remote_file_name = await download_remote_media(driver, media_value)
+                    last_message_id = await send_binary_file(
+                        driver,
+                        api_root=api_root,
+                        token=token,
+                        cdn_base_url=cdn_base_url,
+                        to_user_id=to_user_id,
+                        context_token=context_token,
+                        data=remote_payload,
+                        media_kind=infer_media_kind(remote_file_name, None, force_voice=segment_type == "voice"),
+                        file_name=remote_file_name,
+                        text=caption,
+                        encode_type=data.get("encode_type"),
+                        bits_per_sample=data.get("bits_per_sample"),
+                        sample_rate=data.get("sample_rate"),
+                        playtime=data.get("playtime"),
+                    )
+                else:
+                    last_message_id = await send_media_file(
+                        driver,
+                        api_root=api_root,
+                        token=token,
+                        cdn_base_url=cdn_base_url,
+                        to_user_id=to_user_id,
+                        context_token=context_token,
+                        file_path=media_value,
+                        text=caption,
+                        force_voice=segment_type == "voice",
+                        encode_type=data.get("encode_type"),
+                        bits_per_sample=data.get("bits_per_sample"),
+                        sample_rate=data.get("sample_rate"),
+                        playtime=data.get("playtime"),
+                    )
                 continue
 
             if segment_type in {"image_file", "voice_file", "file_file", "video_file"}:
-                binary_data = data.get("data")
+                binary_data = data.get("content")
                 if binary_data is None:
                     raise ValueError(f"{segment_type} segment missing data")
                 caption = str(data.get("text", ""))
@@ -457,15 +431,15 @@ async def send_segments(
                     media_kind=segment_type,
                     file_name=data.get("file_name"),
                     text=caption,
+                    encode_type=data.get("encode_type"),
+                    bits_per_sample=data.get("bits_per_sample"),
+                    sample_rate=data.get("sample_rate"),
+                    playtime=data.get("playtime"),
                 )
                 continue
 
             raise ValueError(f"unsupported segment type: {segment_type}")
     finally:
-        for temp_file in temp_files:
-            try:
-                os.remove(temp_file)
-            except OSError:
-                pass
+        pass
 
     return last_message_id
