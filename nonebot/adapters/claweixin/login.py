@@ -128,7 +128,8 @@ async def login_flow(
     while True:
         elapsed = time.time() - start_time
         if elapsed >= max_wait:
-            raise LoginError("登录超时（超过 20 秒未完成扫码）请重新启动应用")
+            log("WARNING", "登录超时（超过 20 秒未完成扫码）请重新启动应用")
+            return
 
         poll_timeout = min(35.0, max_wait - elapsed)
         status_data = await poll_qr_status(driver, api_root, qrcode_id, timeout=poll_timeout)
