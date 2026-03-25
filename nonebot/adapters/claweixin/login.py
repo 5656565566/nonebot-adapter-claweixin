@@ -60,12 +60,13 @@ async def poll_qr_status(
     driver: HTTPClientMixin,
     api_root: str,
     qrcode_id: str,
+    timeout: float = 35.0,
 ) -> dict[str, Any]:
     request = Request(
         method="GET",
         url=f"{api_root.rstrip('/')}/ilink/bot/get_qrcode_status?qrcode={qrcode_id}",
         headers={"iLink-App-ClientVersion": "1"},
-        timeout=35.0,
+        timeout=timeout,
     )
     return await _request_json(driver, request, read_timeout_as_wait=True)
 
@@ -116,18 +117,31 @@ async def login_flow(
         raise LoginError("获取登录二维码失败 返回数据缺少 qrcode 或 qrcode_img_content")
 
     display_qr(qrcode_url, qrcode_in_info=qrcode_in_info)
-    log("INFO", "等待扫码确认登录...")
+    log("INFO", "等待扫码确认登录（限时 20 秒）...")
+
+    import time
+    start_time = time.time()
+    max_wait = 20.0
 
     while True:
-        status_data = await poll_qr_status(driver, api_root, qrcode_id)
+        elapsed = time.time() - start_time
+        if elapsed >= max_wait:
+            raise LoginError("登录超时（超过 20 秒未完成扫码）请重新启动应用")
+
+        poll_timeout = min(35.0, max_wait - elapsed)
+        status_data = await poll_qr_status(driver, api_root, qrcode_id, timeout=poll_timeout)
         status = status_data.get("status")
 
         if status == "wait":
-            await asyncio.sleep(2)
+            if time.time() - start_time < max_wait:
+                await asyncio.sleep(2)
             continue
         if status == "scaned":
             log("INFO", "二维码已扫码，请在手机上确认登录")
-            await asyncio.sleep(2)
+            # 扫码后重置超时时间，给用户确认的机会
+            start_time = time.time()
+            if time.time() - start_time < max_wait:
+                await asyncio.sleep(2)
             continue
         if status == "expired":
             raise LoginError("二维码已过期，请重新启动应用后再次登录")
