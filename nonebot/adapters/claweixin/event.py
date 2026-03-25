@@ -23,7 +23,11 @@ class Event(BaseEvent):
 
     @override
     def get_event_description(self) -> str:
-        return str(model_dump(self))
+        data = model_dump(self)
+        media_data = data.get("media_data")
+        if media_data is not None:
+            data["media_data"] = f"<bytes {len(media_data)}B>"
+        return str(data)
 
     @override
     def get_message(self) -> Message:
@@ -50,7 +54,7 @@ class MessageEvent(Event):
     to_me: bool = True
     reply: Optional[Any] = None
     message_id: str
-    
+
     # 微信原始数据字段
     seq: Optional[int] = None
     from_user_id: str
@@ -65,7 +69,11 @@ class MessageEvent(Event):
     message_state: Optional[int] = None
     item_list: List[Dict[str, Any]] = Field(default_factory=list)
     context_token: Optional[str] = None
-    
+
+    media_data: Optional[bytes] = None
+    media_type: Optional[str] = None
+    file_name: Optional[str] = None
+
     message: Optional[Message] = None
     original_message: Optional[Message] = None
 

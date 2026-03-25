@@ -49,8 +49,7 @@ class Bot(BaseBot):
             self._check_nickname(event)
         await handle_event(self, event)
 
-    def _check_at_me(self, event: MessageEvent):
-        # 微信个人对话场景暂时 默认全当做是 @me 应该没问题吧
+    def _check_at_me(self, event: MessageEvent): # 个人对话场景 to_me 保持为 True
         event.to_me = True
 
     def _check_nickname(self, event: MessageEvent):

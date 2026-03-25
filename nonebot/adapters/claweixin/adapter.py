@@ -2,7 +2,6 @@ import json
 import asyncio
 import datetime
 import traceback
-import random
 
 from typing import Any, Optional, Dict, TYPE_CHECKING, cast
 from typing_extensions import override
@@ -12,6 +11,9 @@ from nonebot.drivers import Driver, Request, HTTPClientMixin
 
 from nonebot.adapters import Adapter as BaseAdapter
 
+from .api.api import get_config, get_updates, send_typing
+from .api.media import download_media_from_message
+from .api.send import send_segments
 from .bot import Bot
 from .config import Config
 from .exception import NetworkError, ActionFailed
@@ -56,17 +58,17 @@ class Adapter(BaseAdapter):
         api_root = self.claweixin_config.claweixin_api_root
         qrcode_in_info = self.claweixin_config.claweixin_login_qrcode_in_info
 
-        
-        login_result = await login_flow(
-            cast(HTTPClientMixin, self.driver),
-            api_root,
-            qrcode_in_info=qrcode_in_info,
-        )
+        if qrcode_in_info:
+            login_result = await login_flow(
+                cast(HTTPClientMixin, self.driver),
+                api_root,
+                qrcode_in_info=qrcode_in_info,
+            )
 
-        if login_result: # 加一个临时登陆使用
-            tokens = [login_result["bot_token"]]
-        else:
-            log("WARNING", "ClaWeixin login flow finished without token")
+            if login_result: # 临时登陆使用
+                tokens.append(login_result["bot_token"])
+            else:
+                log("WARNING", "ClaWeixin login flow finished without token")
 
         for index, token in enumerate(tokens, start=1):
             bot = Bot(self, f"claweixin_bot_{index}", token=token)
@@ -90,77 +92,61 @@ class Adapter(BaseAdapter):
         while True:
             try:
                 headers = make_headers(token)
-                payload = {
-                    "get_updates_buf": get_updates_buf,
-                    "base_info": {"channel_version": "1.0.2"},
-                }
-                request = Request(
-                    method="POST",
-                    url=f"{api_root}/ilink/bot/getupdates",
-                    headers=headers,
-                    json=payload,
-                    timeout=40.0,
-                )
                 log("DEBUG", f"Sending getupdates request with buf length: {len(get_updates_buf)}")
 
                 start_time = asyncio.get_running_loop().time()
-                response = await self.request(request)
+                data = await get_updates(
+                    cast(HTTPClientMixin, self.driver),
+                    api_root=api_root,
+                    token=token,
+                    get_updates_buf=get_updates_buf,
+                    timeout=40.0,
+                )
+                log("DEBUG", f"getupdates response: {str(data)[:200]}")
 
-                if response.status_code == 200 and response.content:
-                    data = json.loads(response.content)
-                    log("DEBUG", f"getupdates response: {str(data)[:200]}")
+                if data.get("errcode", 0) != 0 or data.get("base_resp", {}).get("ret", 0) != 0:
+                    log("ERROR", f"WeChat API Error, pausing 5s... Data: {data}")
+                    await asyncio.sleep(5)
+                    continue
 
-                    if data.get("errcode", 0) != 0 or data.get("base_resp", {}).get("ret", 0) != 0:
-                        log("ERROR", f"WeChat API Error, pausing 5s... Data: {data}")
-                        await asyncio.sleep(5)
+                get_updates_buf = data.get("get_updates_buf") or get_updates_buf
+                msgs = data.get("msgs") or []
+                for msg in msgs:
+                    if msg.get("message_type") != 1:
                         continue
 
-                    get_updates_buf = data.get("get_updates_buf") or get_updates_buf
-                    msgs = data.get("msgs") or []
-                    for msg in msgs:
-                        if msg.get("message_type") != 1:
-                            continue
+                    try:
+                        from_id = msg.get("from_user_id", "")
+                        context_token = msg.get("context_token", "")
 
-                        try:
-                            from_id = msg.get("from_user_id", "")
-                            context_token = msg.get("context_token", "")
+                        if from_id and context_token:
+                            if from_id not in self.typing_ticket_cache:
+                                cfg_data = await get_config(
+                                    cast(HTTPClientMixin, self.driver),
+                                    api_root=api_root,
+                                    token=token,
+                                    ilink_user_id=from_id,
+                                    context_token=context_token,
+                                )
+                                self.typing_ticket_cache[from_id] = str(cfg_data.get("typing_ticket", "") or "")
 
-                            if from_id and context_token:
-                                if from_id not in self.typing_ticket_cache:
-                                    cfg_req = Request(
-                                        method="POST",
-                                        url=f"{api_root}/ilink/bot/getconfig",
-                                        headers=headers,
-                                        json={
-                                            "ilink_user_id": from_id,
-                                            "context_token": context_token,
-                                            "base_info": {"channel_version": "1.0.2"},
-                                        },
+                            typing_ticket = self.typing_ticket_cache.get(from_id, "")
+                            if typing_ticket:
+                                asyncio.create_task(
+                                    send_typing(
+                                        cast(HTTPClientMixin, self.driver),
+                                        api_root=api_root,
+                                        token=token,
+                                        body={"ilink_user_id": from_id, "typing_ticket": typing_ticket, "status": 1},
                                     )
-                                    cfg_res = await self.request(cfg_req)
-                                    if cfg_res.status_code == 200 and cfg_res.content:
-                                        cfg_data = json.loads(cfg_res.content)
-                                        self.typing_ticket_cache[from_id] = cfg_data.get("typing_ticket", "")
+                                )
 
-                                typing_ticket = self.typing_ticket_cache.get(from_id, "")
-                                if typing_ticket:
-                                    type_req = Request(
-                                        method="POST",
-                                        url=f"{api_root}/ilink/bot/sendtyping",
-                                        headers=headers,
-                                        json={"ilink_user_id": from_id, "typing_ticket": typing_ticket, "status": 1},
-                                    )
-                                    asyncio.create_task(self.request(type_req))
-
-                            event = self._parse_message(msg)
-                            if event:
-                                log("DEBUG", f"Dispatching event: {event.get_event_name()} (id: {event.message_id})")
-                                asyncio.create_task(bot.handle_event(event))
-                        except Exception as e:
-                            log("ERROR", f"Failed to parse message: {e}\n{traceback.format_exc()}")
-                elif response.status_code != 200:
-                    log("WARNING", f"getUpdates failed with HTTP status {response.status_code}")
-                    await asyncio.sleep(5)
+                        event = await self._parse_message(msg)
+                        if event:
+                            log("DEBUG", f"Dispatching event: {event.get_event_name()} (id: {event.message_id})")
+                            asyncio.create_task(bot.handle_event(event))
+                    except Exception as e:
+                        log("ERROR", f"Failed to parse message: {e}\n{traceback.format_exc()}")
 
                 if asyncio.get_running_loop().time() - start_time < 1.0:
                     await asyncio.sleep(1)
@@ -172,8 +158,14 @@ class Adapter(BaseAdapter):
                 log("ERROR", f"Error in long poll: {e}")
                 await asyncio.sleep(5)
 
-    def _parse_message(self, msg: Dict[str, Any]) -> Optional[Any]:
+    async def _parse_message(self, msg: Dict[str, Any]) -> Optional[Any]:
         create_time = datetime.datetime.fromtimestamp(msg.get("create_time_ms", 0) / 1000.0)
+        item_list = msg.get("item_list", [])
+        media = await download_media_from_message(
+            cast(HTTPClientMixin, self.driver),
+            item_list=item_list,
+            cdn_base_url=self.claweixin_config.claweixin_cdn_root,
+        )
 
         base_kwargs = {
             "time": create_time,
@@ -189,8 +181,11 @@ class Adapter(BaseAdapter):
             "group_id": msg.get("group_id"),
             "message_type": msg.get("message_type"),
             "message_state": msg.get("message_state"),
-            "item_list": msg.get("item_list", []),
+            "item_list": item_list,
             "context_token": msg.get("context_token"),
+            "media_data" : media.media_data,
+            "media_type" : media.media_type,
+            "file_name": media.file_name,
         }
 
         return PrivateMessageEvent(**base_kwargs)
@@ -199,85 +194,47 @@ class Adapter(BaseAdapter):
     async def _call_api(self, bot: Bot, api: str, **data: Any) -> Any:  # type: ignore
         api_root = self.claweixin_config.claweixin_api_root
         token = bot.token
-        headers = make_headers(token)
 
         log("DEBUG", f"Calling API: {api} with data: {data}")
 
-        if api == "send_message":
-            endpoint = "/ilink/bot/sendmessage"
-            message = data.get("message")
-            if isinstance(message, str):
-                message_list = [MessageSegment.text(message)]
-            elif hasattr(message, "type"):
-                message_list = [message]
-            else:
-                message_list = message or []
-
-            item_list = []
-            for seg in message_list:
-                if getattr(seg, "type", None) == "text":
-                    item_list.append({
-                        "type": 1,
-                        "text_item": {"text": getattr(seg, "data", {}).get("text", "")},
-                    })
-                elif getattr(seg, "type", None) == "image":
-                    item_list.append({
-                        "type": 2,
-                        "image_item": {"url": getattr(seg, "data", {}).get("url", "")},
-                    })
-
-            client_id = f"openclaw-weixin-{random.randint(0, 0xFFFFFFFF):08x}"
-            to_user_id = data.get("to_user_id")
-            if not to_user_id:
-                log("ERROR", "Missing to_user_id in send_message")
-                raise ValueError("to_user_id is required")
-
-            payload = {
-                "msg": {
-                    "from_user_id": "",
-                    "to_user_id": to_user_id,
-                    "group_id": data.get("group_id"),
-                    "client_id": client_id,
-                    "message_type": 2,
-                    "message_state": 2,
-                    "context_token": data.get("context_token"),
-                    "item_list": item_list,
-                },
-                "base_info": {"channel_version": "1.0.2"},
-            }
-            request = Request(
-                method="POST",
-                url=f"{api_root}{endpoint}",
-                headers=headers,
-                json=payload,
-            )
-        else:
+        if api != "send_message":
             raise NotImplementedError(f"API {api} is not implemented")
 
+        message = data.get("message")
+        if isinstance(message, str):
+            message_list = [MessageSegment.text(message)]
+        elif hasattr(message, "type"):
+            message_list = [message]
+        else:
+            message_list = message or []
+
+        to_user_id = data.get("to_user_id")
+        if not to_user_id:
+            log("ERROR", "Missing to_user_id in send_message")
+            raise ValueError("to_user_id is required")
+
         try:
-            response = await self.request(request)
-            log("DEBUG", f"API response status: {response.status_code}")
+            result = await send_segments(
+                cast(HTTPClientMixin, self.driver),
+                api_root=api_root,
+                token=token,
+                cdn_base_url=self.claweixin_config.claweixin_cdn_root,
+                to_user_id=to_user_id,
+                context_token=data.get("context_token"),
+                segments=message_list,
+            )
 
-            if api == "send_message" and to_user_id:
-                typing_ticket = self.typing_ticket_cache.get(to_user_id, "")
-                if typing_ticket:
-                    type_req_close = Request(
-                        method="POST",
-                        url=f"{api_root}/ilink/bot/sendtyping",
-                        headers=headers,
-                        json={"ilink_user_id": to_user_id, "typing_ticket": typing_ticket, "status": 2},
+            typing_ticket = self.typing_ticket_cache.get(to_user_id, "")
+            if typing_ticket:
+                asyncio.create_task(
+                    send_typing(
+                        cast(HTTPClientMixin, self.driver),
+                        api_root=api_root,
+                        token=token,
+                        body={"ilink_user_id": to_user_id, "typing_ticket": typing_ticket, "status": 2},
                     )
-                    asyncio.create_task(self.request(type_req_close))
-
+                )
+            return {"message_id": result}
         except Exception as e:
             log("ERROR", f"Network error when calling {api}: {e}")
             raise NetworkError(str(e)) from e
-
-        if 200 <= response.status_code < 300:
-            if not response.content:
-                return None
-            try:
-                return json.loads(response.content)
-            except json.JSONDecodeError:
-                raise ActionFailed(response)
-        raise ActionFailed(response)

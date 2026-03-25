@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 class Config(BaseModel):
     claweixin_token: list[str] = Field(default_factory=list)
     claweixin_api_root: str = Field(default="https://ilinkai.weixin.qq.com")
+    claweixin_cdn_root: str = Field(default="https://novac2c.cdn.weixin.qq.com/c2c")
     claweixin_login_qrcode_in_info: bool = Field(default=False)
 
     @field_validator("claweixin_token", mode="before")
