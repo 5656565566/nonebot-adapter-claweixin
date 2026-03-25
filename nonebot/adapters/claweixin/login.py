@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from typing import Any
 
 from nonebot.drivers import HTTPClientMixin, Request
@@ -121,7 +122,6 @@ async def login_flow(
     display_qr(qrcode_url, qrcode_in_info=qrcode_in_info)
     log("INFO", "等待扫码确认登录（限时 20 秒）...")
 
-    import time
     start_time = time.time()
     max_wait = 20.0
 
@@ -141,11 +141,11 @@ async def login_flow(
             continue
         if status == "scaned":
             log("INFO", "二维码已扫码，请在手机上确认登录")
-            # 扫码后重置超时时间，给用户确认的机会
             start_time = time.time()
             if time.time() - start_time < max_wait:
                 await asyncio.sleep(2)
             continue
+        
         if status == "expired":
             raise LoginError("二维码已过期，请重新启动应用后再次登录")
         if status == "confirmed":

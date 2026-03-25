@@ -1,9 +1,9 @@
 import datetime
 from copy import deepcopy
-from typing import Any, Optional, TYPE_CHECKING, List, Dict
+from typing import Any, Optional, List, Dict
 from typing_extensions import override
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from nonebot.adapters import Event as BaseEvent
 from nonebot.compat import model_dump
 
@@ -66,21 +66,28 @@ class MessageEvent(Event):
     item_list: List[Dict[str, Any]] = Field(default_factory=list)
     context_token: Optional[str] = None
     
-    if TYPE_CHECKING:
-        message: Message
-        original_message: Message
-        
+    message: Optional[Message] = None
+    original_message: Optional[Message] = None
+
+    @model_validator(mode="after")
+    def populate_messages(self) -> "MessageEvent":
+        if self.message is None:
+            self.message = Message.from_message_items(self.item_list)
+        if self.original_message is None:
+            self.original_message = deepcopy(self.message)
+        return self
+
     @override
     def get_type(self) -> str:
         return "message"
 
     @override
     def get_message(self) -> Message:
-        if not hasattr(self, "message"):
-            msg = Message.from_message_items(self.item_list)
-            setattr(self, "message", msg)
-            setattr(self, "original_message", deepcopy(msg))
-        return getattr(self, "message")
+        if self.message is None:
+            self.message = Message.from_message_items(self.item_list)
+        if self.original_message is None:
+            self.original_message = deepcopy(self.message)
+        return self.message
 
     @override
     def get_plaintext(self) -> str:
