@@ -23,11 +23,12 @@ class Event(BaseEvent):
 
     @override
     def get_event_description(self) -> str:
-        data = model_dump(self)
-        media_data = data.get("media_data")
-        if media_data is not None:
-            data["media_data"] = f"<bytes {len(media_data)}B>"
-        return str(data)
+        message = getattr(self, "message", None) or self.get_message()
+        message_id = getattr(self, "message_id", "")
+        preview = str(message)
+        if not preview:
+            preview = "[空消息]"
+        return f"Message {message_id} {preview}"
 
     @override
     def get_message(self) -> Message:
@@ -80,7 +81,11 @@ class MessageEvent(Event):
     @model_validator(mode="after")
     def populate_messages(self) -> "MessageEvent":
         if self.message is None:
-            self.message = Message.from_message_items(self.item_list)
+            self.message = Message.from_message_items(
+                self.item_list,
+                media_data=self.media_data,
+                file_name=self.file_name,
+            )
         if self.original_message is None:
             self.original_message = deepcopy(self.message)
         return self
@@ -92,7 +97,11 @@ class MessageEvent(Event):
     @override
     def get_message(self) -> Message:
         if self.message is None:
-            self.message = Message.from_message_items(self.item_list)
+            self.message = Message.from_message_items(
+                self.item_list,
+                media_data=self.media_data,
+                file_name=self.file_name,
+            )
         if self.original_message is None:
             self.original_message = deepcopy(self.message)
         return self.message

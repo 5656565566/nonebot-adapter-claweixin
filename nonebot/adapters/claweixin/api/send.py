@@ -1,6 +1,7 @@
 import base64
 import mimetypes
 import os
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable
@@ -23,6 +24,19 @@ UPLOAD_MEDIA_TYPE_IMAGE = 1
 UPLOAD_MEDIA_TYPE_VIDEO = 2
 UPLOAD_MEDIA_TYPE_FILE = 3
 UPLOAD_MEDIA_TYPE_VOICE = 4
+
+
+@dataclass(slots=True)
+class PreparedMedia:
+    payload: bytes
+    media_kind: str
+    file_name: str
+    text: str = ""
+    mime_type: str | None = None
+    encode_type: int | None = None
+    bits_per_sample: int | None = None
+    sample_rate: int | None = None
+    playtime: int | None = None
 
 
 def generate_client_id() -> str:
@@ -130,7 +144,6 @@ def build_image_item(uploaded: UploadedFileInfo) -> dict[str, Any]:
     }
 
 
-
 def build_video_item(uploaded: UploadedFileInfo) -> dict[str, Any]:
     return {
         "type": MESSAGE_ITEM_TYPE_VIDEO,
@@ -143,7 +156,6 @@ def build_video_item(uploaded: UploadedFileInfo) -> dict[str, Any]:
             "video_size": uploaded.file_size,
         },
     }
-
 
 
 def build_file_item(uploaded: UploadedFileInfo, file_name: str) -> dict[str, Any]:
@@ -200,15 +212,115 @@ def normalize_binary_file(data: bytes | BytesIO | Path) -> tuple[bytes, str | No
     return data.read_bytes(), data.name
 
 
+def _default_file_name(media_kind: str) -> str:
+    return {
+        "image": "image.bin",
+        "voice": "voice.silk",
+        "file": "file.bin",
+        "video": "video.mp4",
+    }.get(media_kind, "file.bin")
+
+
 def infer_media_kind(file_name: str | None, mime_type: str | None, *, force_voice: bool = False) -> str:
     if force_voice:
-        return "voice_file"
+        return "voice"
     mime = mime_type or (mimetypes.guess_type(file_name or "")[0] if file_name else None) or "application/octet-stream"
     if mime.startswith("image/"):
-        return "image_file"
+        return "image"
     if mime.startswith("video/"):
-        return "video_file"
-    return "file_file"
+        return "video"
+    return "file"
+
+
+def build_prepared_media(
+    *,
+    payload: bytes,
+    file_name: str | None,
+    mime_type: str | None = None,
+    text: str = "",
+    segment_type: str | None = None,
+    encode_type: int | None = None,
+    bits_per_sample: int | None = None,
+    sample_rate: int | None = None,
+    playtime: int | None = None,
+) -> PreparedMedia:
+    media_kind = segment_type or infer_media_kind(file_name, mime_type)
+    actual_file_name = file_name or _default_file_name(media_kind)
+    return PreparedMedia(
+        payload=payload,
+        media_kind=media_kind,
+        file_name=actual_file_name,
+        text=text,
+        mime_type=mime_type,
+        encode_type=encode_type,
+        bits_per_sample=bits_per_sample,
+        sample_rate=sample_rate,
+        playtime=playtime,
+    )
+
+
+def prepare_local_media(
+    *,
+    file_path: str,
+    text: str = "",
+    force_voice: bool = False,
+    encode_type: int | None = None,
+    bits_per_sample: int | None = None,
+    sample_rate: int | None = None,
+    playtime: int | None = None,
+) -> PreparedMedia:
+    path = Path(file_path)
+    return build_prepared_media(
+        payload=path.read_bytes(),
+        file_name=path.name,
+        text=text,
+        segment_type="voice" if force_voice else None,
+        encode_type=encode_type,
+        bits_per_sample=bits_per_sample,
+        sample_rate=sample_rate,
+        playtime=playtime,
+    )
+
+
+def prepare_segment_media(
+    *,
+    segment_type: str,
+    data: dict[str, Any],
+) -> PreparedMedia | None:
+    content = data.get("content")
+    if isinstance(content, bytes):
+        return build_prepared_media(
+            payload=content,
+            file_name=data.get("file_name"),
+            mime_type=data.get("mime_type"),
+            text=str(data.get("text", "")),
+            segment_type=segment_type,
+            encode_type=data.get("encode_type"),
+            bits_per_sample=data.get("bits_per_sample"),
+            sample_rate=data.get("sample_rate"),
+            playtime=data.get("playtime"),
+        )
+
+    media = data.get("media") or {}
+    if media.get("encrypt_query_param"):
+        return None
+
+    media_value = str(data.get("file") or data.get("path") or data.get("url") or "")
+    if not media_value:
+        raise ValueError(f"{segment_type} segment missing file/path/url/content")
+
+    if "://" in media_value:
+        raise ValueError("remote media should be prepared via download flow")
+
+    return prepare_local_media(
+        file_path=media_value,
+        text=str(data.get("text", "")),
+        force_voice=segment_type == "voice",
+        encode_type=data.get("encode_type"),
+        bits_per_sample=data.get("bits_per_sample"),
+        sample_rate=data.get("sample_rate"),
+        playtime=data.get("playtime"),
+    )
 
 
 async def send_media_file(
@@ -227,7 +339,15 @@ async def send_media_file(
     sample_rate: int | None = None,
     playtime: int | None = None,
 ) -> str:
-    payload = Path(file_path).read_bytes()
+    prepared = prepare_local_media(
+        file_path=file_path,
+        text=text,
+        force_voice=force_voice,
+        encode_type=encode_type,
+        bits_per_sample=bits_per_sample,
+        sample_rate=sample_rate,
+        playtime=playtime,
+    )
     return await send_binary_file(
         driver,
         api_root=api_root,
@@ -235,14 +355,14 @@ async def send_media_file(
         cdn_base_url=cdn_base_url,
         to_user_id=to_user_id,
         context_token=context_token,
-        data=payload,
-        media_kind=infer_media_kind(file_path, None, force_voice=force_voice),
-        file_name=Path(file_path).name,
-        text=text,
-        encode_type=encode_type,
-        bits_per_sample=bits_per_sample,
-        sample_rate=sample_rate,
-        playtime=playtime,
+        data=prepared.payload,
+        media_kind=prepared.media_kind,
+        file_name=prepared.file_name,
+        text=prepared.text,
+        encode_type=prepared.encode_type,
+        bits_per_sample=prepared.bits_per_sample,
+        sample_rate=prepared.sample_rate,
+        playtime=prepared.playtime,
     )
 
 
@@ -264,15 +384,9 @@ async def send_binary_file(
     playtime: int | None = None,
 ) -> str:
     payload, inferred_file_name = normalize_binary_file(data)
-    default_name = {
-        "image_file": "image.bin",
-        "voice_file": "voice.silk",
-        "file_file": "file.bin",
-        "video_file": "video.mp4",
-    }.get(media_kind, "file.bin")
-    actual_file_name = file_name or inferred_file_name or default_name
+    actual_file_name = file_name or inferred_file_name or _default_file_name(media_kind)
 
-    if media_kind == "image_file":
+    if media_kind == "image":
         uploaded = await upload_media_to_cdn(
             driver=driver,
             api_root=api_root,
@@ -283,7 +397,7 @@ async def send_binary_file(
             media_type=UPLOAD_MEDIA_TYPE_IMAGE,
         )
         media_item = build_image_item(uploaded)
-    elif media_kind == "voice_file":
+    elif media_kind == "voice":
         uploaded = await upload_media_to_cdn(
             driver=driver,
             api_root=api_root,
@@ -291,17 +405,27 @@ async def send_binary_file(
             cdn_base_url=cdn_base_url,
             payload=payload,
             to_user_id=to_user_id,
-            media_type=UPLOAD_MEDIA_TYPE_VOICE,
+            # media_type=UPLOAD_MEDIA_TYPE_VOICE, 暂不可用使用文件替代
+            media_type=UPLOAD_MEDIA_TYPE_FILE,
         )
+        """
+        resolved_sample_rate = sample_rate
+        resolved_bits_per_sample = bits_per_sample
+        if resolved_sample_rate is None and actual_file_name.lower().endswith(".silk"):
+            resolved_sample_rate = 24000
+        if resolved_bits_per_sample is None and actual_file_name.lower().endswith(".silk"):
+            resolved_bits_per_sample = 16
         media_item = build_voice_item(
             uploaded,
             text,
             encode_type=encode_type,
-            bits_per_sample=bits_per_sample,
-            sample_rate=sample_rate,
+            bits_per_sample=resolved_bits_per_sample,
+            sample_rate=resolved_sample_rate,
             playtime=playtime,
         )
-    elif media_kind == "video_file":
+        """
+        media_item = build_file_item(uploaded, actual_file_name)
+    elif media_kind == "video":
         uploaded = await upload_media_to_cdn(
             driver=driver,
             api_root=api_root,
@@ -324,7 +448,7 @@ async def send_binary_file(
         )
         media_item = build_file_item(uploaded, actual_file_name)
 
-    if text and media_kind != "voice_file":
+    if text and media_kind != "voice":
         await send_text_message(
             driver,
             api_root=api_root,
@@ -370,56 +494,24 @@ async def send_segments(
                 continue
 
             if segment_type in {"image", "voice", "file", "video"}:
-                media_value = str(
-                    data.get("file")
-                    or data.get("path")
-                    or data.get("url")
-                    or ""
-                )
-                if not media_value:
-                    raise ValueError(f"{segment_type} segment missing file/path/url")
-                caption = str(data.get("text", ""))
+                media_value = str(data.get("file") or data.get("path") or data.get("url") or "")
                 if "://" in media_value:
                     remote_payload, remote_file_name = await download_remote_media(driver, media_value)
-                    last_message_id = await send_binary_file(
-                        driver,
-                        api_root=api_root,
-                        token=token,
-                        cdn_base_url=cdn_base_url,
-                        to_user_id=to_user_id,
-                        context_token=context_token,
-                        data=remote_payload,
-                        media_kind=infer_media_kind(remote_file_name, None, force_voice=segment_type == "voice"),
+                    prepared = build_prepared_media(
+                        payload=remote_payload,
                         file_name=remote_file_name,
-                        text=caption,
+                        text=str(data.get("text", "")),
+                        segment_type=segment_type,
                         encode_type=data.get("encode_type"),
                         bits_per_sample=data.get("bits_per_sample"),
                         sample_rate=data.get("sample_rate"),
                         playtime=data.get("playtime"),
                     )
                 else:
-                    last_message_id = await send_media_file(
-                        driver,
-                        api_root=api_root,
-                        token=token,
-                        cdn_base_url=cdn_base_url,
-                        to_user_id=to_user_id,
-                        context_token=context_token,
-                        file_path=media_value,
-                        text=caption,
-                        force_voice=segment_type == "voice",
-                        encode_type=data.get("encode_type"),
-                        bits_per_sample=data.get("bits_per_sample"),
-                        sample_rate=data.get("sample_rate"),
-                        playtime=data.get("playtime"),
-                    )
-                continue
+                    prepared = prepare_segment_media(segment_type=segment_type, data=data)
+                    if prepared is None:
+                        continue
 
-            if segment_type in {"image_file", "voice_file", "file_file", "video_file"}:
-                binary_data = data.get("content")
-                if binary_data is None:
-                    raise ValueError(f"{segment_type} segment missing data")
-                caption = str(data.get("text", ""))
                 last_message_id = await send_binary_file(
                     driver,
                     api_root=api_root,
@@ -427,14 +519,14 @@ async def send_segments(
                     cdn_base_url=cdn_base_url,
                     to_user_id=to_user_id,
                     context_token=context_token,
-                    data=binary_data,
-                    media_kind=segment_type,
-                    file_name=data.get("file_name"),
-                    text=caption,
-                    encode_type=data.get("encode_type"),
-                    bits_per_sample=data.get("bits_per_sample"),
-                    sample_rate=data.get("sample_rate"),
-                    playtime=data.get("playtime"),
+                    data=prepared.payload,
+                    media_kind=prepared.media_kind,
+                    file_name=prepared.file_name,
+                    text=prepared.text,
+                    encode_type=prepared.encode_type,
+                    bits_per_sample=prepared.bits_per_sample,
+                    sample_rate=prepared.sample_rate,
+                    playtime=prepared.playtime,
                 )
                 continue
 

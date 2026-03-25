@@ -91,7 +91,6 @@ class Adapter(BaseAdapter):
         log("DEBUG", f"Start long polling for bot {bot.self_id} at {api_root}")
         while True:
             try:
-                headers = make_headers(token)
                 log("DEBUG", f"Sending getupdates request with buf length: {len(get_updates_buf)}")
 
                 start_time = asyncio.get_running_loop().time()
