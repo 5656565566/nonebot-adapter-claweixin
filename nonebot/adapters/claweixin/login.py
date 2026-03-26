@@ -1,9 +1,13 @@
+import argparse
 import asyncio
 import json
+import sys
 import time
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as URLRequest, urlopen
 
-from nonebot.drivers import HTTPClientMixin, Request
+from nonebot.drivers import HTTPClientMixin, Request, Response
 
 from .utils import log
 
@@ -165,6 +169,97 @@ async def login_flow(
         raise LoginError(f"未知登录状态: {status}")
 
 
+class _CliHTTPDriver(HTTPClientMixin):
+    @property
+    def type(self) -> str:
+        return "claweixin-cli"
+
+    async def request(self, setup: Request) -> Response:
+        return await asyncio.to_thread(self._request_sync, setup)
+
+    async def stream_request(self, setup: Request):
+        raise NotImplementedError("CLI 登录流程不需要 stream_request")
+
+    async def get_session(self):
+        raise NotImplementedError("CLI 登录流程不需要 get_session")
+
+    def _request_sync(self, setup: Request) -> Response:
+        body = setup.content
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+
+        request = URLRequest(
+            url=str(setup.url),
+            data=body,
+            method=setup.method,
+            headers=dict(setup.headers),
+        )
+
+        timeout = None
+        if isinstance(setup.timeout, (int, float)):
+            timeout = float(setup.timeout)
+
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return Response(
+                    response.status,
+                    headers=dict(response.headers.items()),
+                    content=response.read(),
+                    request=setup,
+                )
+        except HTTPError as exception:
+            return Response(
+                exception.code,
+                headers=dict(exception.headers.items()),
+                content=exception.read(),
+                request=setup,
+            )
+        except TimeoutError:
+            raise
+        except URLError as exception:
+            reason = exception.reason
+            if isinstance(reason, TimeoutError):
+                raise reason
+            raise RuntimeError(f"登录请求失败: {reason}") from exception
+
+
+def _build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="ClaWeixin 登录工具")
+    parser.add_argument(
+        "--api-root",
+        default="https://ilinkai.weixin.qq.com",
+        help="Weixin API 根地址",
+    )
+    parser.add_argument(
+        "--qrcode-in-info",
+        action="store_true",
+        help="通过 nonebot logger 输出二维码，而不是直接打印到标准输出",
+    )
+    return parser
+
+
+async def _run_cli_login(api_root: str, *, qrcode_in_info: bool) -> int:
+    driver = _CliHTTPDriver()
+    try:
+        result = await login_flow(driver, api_root, qrcode_in_info=qrcode_in_info)
+    except LoginError as exception:
+        print(f"claweixin-login 失败: {exception}", file=sys.stderr)
+        return 1
+    except Exception as exception:
+        print(f"claweixin-login 失败: {exception}", file=sys.stderr)
+        return 1
+
+    if not result:
+        return 1
+    return 0
+
+
+def main() -> None:
+    parser = _build_argument_parser()
+    args = parser.parse_args()
+    raise SystemExit(asyncio.run(_run_cli_login(args.api_root, qrcode_in_info=args.qrcode_in_info)))
+
+
 if __name__ == "__main__":
-    raise SystemExit("请在 nonebot 适配器初始化流程中调用 login_flow 而不是直接运行该模块")
+    main()
 
