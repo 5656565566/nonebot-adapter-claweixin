@@ -120,15 +120,15 @@ async def login_flow(
         raise LoginError("获取登录二维码失败 返回数据缺少 qrcode 或 qrcode_img_content")
 
     display_qr(qrcode_url, qrcode_in_info=qrcode_in_info)
-    log("INFO", "等待扫码确认登录（限时 20 秒）...")
+    log("INFO", "等待扫码确认登录（限时 30 秒）...")
 
     start_time = time.time()
-    max_wait = 20.0
+    max_wait = 30.0
 
     while True:
         elapsed = time.time() - start_time
         if elapsed >= max_wait:
-            log("WARNING", "登录超时（超过 20 秒未完成扫码）请重新启动应用")
+            log("WARNING", "登录超时（超过 30 秒未完成扫码）请重新启动应用")
             return
 
         poll_timeout = min(35.0, max_wait - elapsed)
