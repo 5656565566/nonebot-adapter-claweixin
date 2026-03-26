@@ -18,7 +18,7 @@ homepage = "https://github.com/5656565566/nonebot-adapter-claweixin"
 repository = "https://github.com/5656565566/nonebot-adapter-claweixin"
 
 [project.optional-dependencies]
-login = ["qrcode>=8.2"]
+qrcode = ["qrcode>=8.2"]
 
 [tool.ruff]
 line-length = 88
