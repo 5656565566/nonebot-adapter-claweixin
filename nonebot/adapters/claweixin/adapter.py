@@ -1,4 +1,3 @@
-import json
 import asyncio
 import datetime
 import traceback
@@ -20,10 +19,7 @@ from .exception import NetworkError, ActionFailed
 from .utils import make_headers, log
 from .event import PrivateMessageEvent
 from .login import login_flow
-
-if TYPE_CHECKING:
-    from .message import Message, MessageSegment
-
+from .message import MessageSegment
 
 class Adapter(BaseAdapter):
 
