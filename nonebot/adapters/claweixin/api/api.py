@@ -6,23 +6,34 @@ from typing import Any, Optional
 from nonebot.drivers import HTTPClientMixin, Request, Response
 
 from ..exception import ActionFailed, NetworkError
+from .common import (
+    build_common_headers,
+    get_channel_version,
+    sanitize_bot_agent,
+)
 
 DEFAULT_LONG_POLL_TIMEOUT = 35.0
 DEFAULT_API_TIMEOUT = 15.0
 DEFAULT_CONFIG_TIMEOUT = 10.0
-DEFAULT_CHANNEL_VERSION = "1.0.2"
 
 
-def build_base_info() -> dict[str, str]:
-    return {"channel_version": DEFAULT_CHANNEL_VERSION}
+def build_base_info(bot_agent: Optional[str] = None) -> dict[str, str]:
+    return {
+        "channel_version": get_channel_version(),
+        "bot_agent": sanitize_bot_agent(bot_agent),
+    }
 
 
-def build_headers(token: Optional[str] = None) -> dict[str, str]:
+def build_headers(
+    token: Optional[str] = None,
+    route_tag: Optional[str] = None,
+) -> dict[str, str]:
     uin = str(random.randint(0, 0xFFFFFFFF))
     headers = {
         "Content-Type": "application/json",
         "AuthorizationType": "ilink_bot_token",
         "X-WECHAT-UIN": base64.b64encode(uin.encode()).decode(),
+        **build_common_headers(route_tag),
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -52,7 +63,9 @@ async def request_json(
     try:
         data = json.loads(response.content)
     except Exception as exception:
-        raise NetworkError(f"{action_name} response is invalid json: {exception}") from exception
+        raise NetworkError(
+            f"{action_name} response is invalid json: {exception}"
+        ) from exception
 
     return data if isinstance(data, dict) else {"data": data}
 
@@ -64,14 +77,16 @@ async def get_updates(
     token: str,
     get_updates_buf: str = "",
     timeout: float = DEFAULT_LONG_POLL_TIMEOUT,
+    bot_agent: Optional[str] = None,
+    route_tag: Optional[str] = None,
 ) -> dict[str, Any]:
     request = Request(
         method="POST",
         url=f"{api_root}/ilink/bot/getupdates",
-        headers=build_headers(token),
+        headers=build_headers(token, route_tag=route_tag),
         json={
             "get_updates_buf": get_updates_buf,
-            "base_info": build_base_info(),
+            "base_info": build_base_info(bot_agent),
         },
         timeout=timeout,
     )
@@ -85,15 +100,19 @@ async def send_message(
     token: str,
     body: dict[str, Any],
     timeout: float = DEFAULT_API_TIMEOUT,
+    bot_agent: Optional[str] = None,
+    route_tag: Optional[str] = None,
 ) -> dict[str, Any]:
     request = Request(
         method="POST",
         url=f"{api_root}/ilink/bot/sendmessage",
-        headers=build_headers(token),
-        json={**body, "base_info": build_base_info()},
+        headers=build_headers(token, route_tag=route_tag),
+        json={**body, "base_info": build_base_info(bot_agent)},
         timeout=timeout,
     )
-    return await request_json(driver, request, action_name="sendmessage", allow_empty=True)
+    return await request_json(
+        driver, request, action_name="sendmessage", allow_empty=True
+    )
 
 
 async def get_upload_url(
@@ -103,12 +122,14 @@ async def get_upload_url(
     token: str,
     body: dict[str, Any],
     timeout: float = DEFAULT_API_TIMEOUT,
+    bot_agent: Optional[str] = None,
+    route_tag: Optional[str] = None,
 ) -> dict[str, Any]:
     request = Request(
         method="POST",
         url=f"{api_root}/ilink/bot/getuploadurl",
-        headers=build_headers(token),
-        json={**body, "base_info": build_base_info()},
+        headers=build_headers(token, route_tag=route_tag),
+        json={**body, "base_info": build_base_info(bot_agent)},
         timeout=timeout,
     )
     return await request_json(driver, request, action_name="getuploadurl")
@@ -122,15 +143,17 @@ async def get_config(
     ilink_user_id: str,
     context_token: Optional[str] = None,
     timeout: float = DEFAULT_CONFIG_TIMEOUT,
+    bot_agent: Optional[str] = None,
+    route_tag: Optional[str] = None,
 ) -> dict[str, Any]:
     request = Request(
         method="POST",
         url=f"{api_root}/ilink/bot/getconfig",
-        headers=build_headers(token),
+        headers=build_headers(token, route_tag=route_tag),
         json={
             "ilink_user_id": ilink_user_id,
             "context_token": context_token,
-            "base_info": build_base_info(),
+            "base_info": build_base_info(bot_agent),
         },
         timeout=timeout,
     )
@@ -144,12 +167,58 @@ async def send_typing(
     token: str,
     body: dict[str, Any],
     timeout: float = DEFAULT_CONFIG_TIMEOUT,
+    bot_agent: Optional[str] = None,
+    route_tag: Optional[str] = None,
 ) -> dict[str, Any]:
     request = Request(
         method="POST",
         url=f"{api_root}/ilink/bot/sendtyping",
-        headers=build_headers(token),
-        json={**body, "base_info": build_base_info()},
+        headers=build_headers(token, route_tag=route_tag),
+        json={**body, "base_info": build_base_info(bot_agent)},
         timeout=timeout,
     )
-    return await request_json(driver, request, action_name="sendtyping", allow_empty=True)
+    return await request_json(
+        driver, request, action_name="sendtyping", allow_empty=True
+    )
+
+
+async def notify_start(
+    driver: HTTPClientMixin,
+    *,
+    api_root: str,
+    token: str,
+    timeout: float = DEFAULT_CONFIG_TIMEOUT,
+    bot_agent: Optional[str] = None,
+    route_tag: Optional[str] = None,
+) -> dict[str, Any]:
+    request = Request(
+        method="POST",
+        url=f"{api_root}/ilink/bot/msg/notifystart",
+        headers=build_headers(token, route_tag=route_tag),
+        json={"base_info": build_base_info(bot_agent)},
+        timeout=timeout,
+    )
+    return await request_json(
+        driver, request, action_name="notifystart", allow_empty=True
+    )
+
+
+async def notify_stop(
+    driver: HTTPClientMixin,
+    *,
+    api_root: str,
+    token: str,
+    timeout: float = DEFAULT_CONFIG_TIMEOUT,
+    bot_agent: Optional[str] = None,
+    route_tag: Optional[str] = None,
+) -> dict[str, Any]:
+    request = Request(
+        method="POST",
+        url=f"{api_root}/ilink/bot/msg/notifystop",
+        headers=build_headers(token, route_tag=route_tag),
+        json={"base_info": build_base_info(bot_agent)},
+        timeout=timeout,
+    )
+    return await request_json(
+        driver, request, action_name="notifystop", allow_empty=True
+    )

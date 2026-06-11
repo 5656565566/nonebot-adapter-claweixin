@@ -71,6 +71,8 @@ async def send_text_message(
     to_user_id: str,
     context_token: str | None,
     text: str,
+    bot_agent: str | None = None,
+    route_tag: str | None = None,
 ) -> str:
     client_id = generate_client_id()
     await send_message(
@@ -93,6 +95,8 @@ async def send_text_message(
                 ],
             }
         },
+        bot_agent=bot_agent,
+        route_tag=route_tag,
     )
     return client_id
 
@@ -105,6 +109,8 @@ async def send_media_item(
     to_user_id: str,
     context_token: str | None,
     media_item: dict[str, Any],
+    bot_agent: str | None = None,
+    route_tag: str | None = None,
 ) -> str:
     last_client_id = generate_client_id()
     await send_message(
@@ -122,6 +128,8 @@ async def send_media_item(
                 "item_list": [media_item],
             }
         },
+        bot_agent=bot_agent,
+        route_tag=route_tag,
     )
     return last_client_id
 
@@ -338,6 +346,8 @@ async def send_media_file(
     bits_per_sample: int | None = None,
     sample_rate: int | None = None,
     playtime: int | None = None,
+    bot_agent: str | None = None,
+    route_tag: str | None = None,
 ) -> str:
     prepared = prepare_local_media(
         file_path=file_path,
@@ -363,6 +373,8 @@ async def send_media_file(
         bits_per_sample=prepared.bits_per_sample,
         sample_rate=prepared.sample_rate,
         playtime=prepared.playtime,
+        bot_agent=bot_agent,
+        route_tag=route_tag,
     )
 
 
@@ -382,6 +394,8 @@ async def send_binary_file(
     bits_per_sample: int | None = None,
     sample_rate: int | None = None,
     playtime: int | None = None,
+    bot_agent: str | None = None,
+    route_tag: str | None = None,
 ) -> str:
     payload, inferred_file_name = normalize_binary_file(data)
     actual_file_name = file_name or inferred_file_name or _default_file_name(media_kind)
@@ -395,6 +409,8 @@ async def send_binary_file(
             payload=payload,
             to_user_id=to_user_id,
             media_type=UPLOAD_MEDIA_TYPE_IMAGE,
+            bot_agent=bot_agent,
+            route_tag=route_tag,
         )
         media_item = build_image_item(uploaded)
     elif media_kind == "voice":
@@ -407,6 +423,8 @@ async def send_binary_file(
             to_user_id=to_user_id,
             # media_type=UPLOAD_MEDIA_TYPE_VOICE, 暂不可用使用文件替代
             media_type=UPLOAD_MEDIA_TYPE_FILE,
+            bot_agent=bot_agent,
+            route_tag=route_tag,
         )
         """
         resolved_sample_rate = sample_rate
@@ -434,6 +452,8 @@ async def send_binary_file(
             payload=payload,
             to_user_id=to_user_id,
             media_type=UPLOAD_MEDIA_TYPE_VIDEO,
+            bot_agent=bot_agent,
+            route_tag=route_tag,
         )
         media_item = build_video_item(uploaded)
     else:
@@ -445,6 +465,8 @@ async def send_binary_file(
             payload=payload,
             to_user_id=to_user_id,
             media_type=UPLOAD_MEDIA_TYPE_FILE,
+            bot_agent=bot_agent,
+            route_tag=route_tag,
         )
         media_item = build_file_item(uploaded, actual_file_name)
 
@@ -456,6 +478,8 @@ async def send_binary_file(
             to_user_id=to_user_id,
             context_token=context_token,
             text=text,
+            bot_agent=bot_agent,
+            route_tag=route_tag,
         )
     return await send_media_item(
         driver,
@@ -464,6 +488,8 @@ async def send_binary_file(
         to_user_id=to_user_id,
         context_token=context_token,
         media_item=media_item,
+        bot_agent=bot_agent,
+        route_tag=route_tag,
     )
 
 
@@ -476,6 +502,8 @@ async def send_segments(
     to_user_id: str,
     context_token: str | None,
     segments: Iterable[Any],
+    bot_agent: str | None = None,
+    route_tag: str | None = None,
 ) -> str:
     last_message_id = ""
     try:
@@ -490,6 +518,8 @@ async def send_segments(
                     to_user_id=to_user_id,
                     context_token=context_token,
                     text=str(data.get("text", "")),
+                    bot_agent=bot_agent,
+                    route_tag=route_tag,
                 )
                 continue
 
@@ -527,6 +557,8 @@ async def send_segments(
                     bits_per_sample=prepared.bits_per_sample,
                     sample_rate=prepared.sample_rate,
                     playtime=prepared.playtime,
+                    bot_agent=bot_agent,
+                    route_tag=route_tag,
                 )
                 continue
 

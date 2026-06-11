@@ -10,7 +10,7 @@ from nonebot.drivers import Driver, Request, HTTPClientMixin
 
 from nonebot.adapters import Adapter as BaseAdapter
 
-from .api.api import get_config, get_updates, send_typing
+from .api.api import get_config, get_updates, notify_start, notify_stop, send_typing
 from .api.media import download_media_from_message
 from .api.send import send_segments
 from .bot import Bot
@@ -59,10 +59,13 @@ class Adapter(BaseAdapter):
                 cast(HTTPClientMixin, self.driver),
                 api_root,
                 qrcode_in_info=qrcode_in_info,
+                local_token_list=tokens,
             )
 
-            if login_result: # 临时登陆使用
+            if login_result and login_result.get("bot_token"): # 临时登陆使用
                 tokens.append(login_result["bot_token"])
+            elif login_result and login_result.get("already_connected"):
+                log("INFO", "ClaWeixin already connected, skip temporary token append")
             else:
                 log("WARNING", "ClaWeixin login flow finished without token")
 
@@ -70,6 +73,18 @@ class Adapter(BaseAdapter):
             bot = Bot(self, f"claweixin_bot_{index}", token=token)
             self.bot_connect(bot)
             log("DEBUG", f"Bot {bot.self_id} connected.")
+            try:
+                data = await notify_start(
+                    cast(HTTPClientMixin, self.driver),
+                    api_root=api_root,
+                    token=token,
+                    bot_agent=self.claweixin_config.claweixin_bot_agent,
+                    route_tag=self.claweixin_config.claweixin_route_tag or None,
+                )
+                if data.get("ret") not in (None, 0):
+                    log("WARNING", f"ClaWeixin notify_start returned: {data}")
+            except Exception as e:
+                log("WARNING", f"ClaWeixin notify_start failed and ignored: {e}")
             self.tasks.append(asyncio.create_task(self._poll_updates(bot, token)))
 
     async def _shutdown(self) -> None:
@@ -77,8 +92,19 @@ class Adapter(BaseAdapter):
         for task in self.tasks:
             if not task.done():
                 task.cancel()
-        for bot in list(self.bots.values()):
-            self.bot_disconnect(bot)
+        for base_bot in list(self.bots.values()):
+            bot = cast(Bot, base_bot)
+            try:
+                await notify_stop(
+                    cast(HTTPClientMixin, self.driver),
+                    api_root=self.claweixin_config.claweixin_api_root,
+                    token=bot.token,
+                    bot_agent=self.claweixin_config.claweixin_bot_agent,
+                    route_tag=self.claweixin_config.claweixin_route_tag or None,
+                )
+            except Exception as e:
+                log("WARNING", f"ClaWeixin notify_stop failed and ignored: {e}")
+            self.bot_disconnect(base_bot)
 
     async def _poll_updates(self, bot: Bot, token: str) -> None:
         api_root = self.claweixin_config.claweixin_api_root
@@ -96,6 +122,8 @@ class Adapter(BaseAdapter):
                     token=token,
                     get_updates_buf=get_updates_buf,
                     timeout=40.0,
+                    bot_agent=self.claweixin_config.claweixin_bot_agent,
+                    route_tag=self.claweixin_config.claweixin_route_tag or None,
                 )
                 log("DEBUG", f"getupdates response: {str(data)[:200]}")
 
@@ -122,6 +150,8 @@ class Adapter(BaseAdapter):
                                     token=token,
                                     ilink_user_id=from_id,
                                     context_token=context_token,
+                                    bot_agent=self.claweixin_config.claweixin_bot_agent,
+                                    route_tag=self.claweixin_config.claweixin_route_tag or None,
                                 )
                                 self.typing_ticket_cache[from_id] = str(cfg_data.get("typing_ticket", "") or "")
 
@@ -133,6 +163,8 @@ class Adapter(BaseAdapter):
                                         api_root=api_root,
                                         token=token,
                                         body={"ilink_user_id": from_id, "typing_ticket": typing_ticket, "status": 1},
+                                        bot_agent=self.claweixin_config.claweixin_bot_agent,
+                                        route_tag=self.claweixin_config.claweixin_route_tag or None,
                                     )
                                 )
 
@@ -217,6 +249,8 @@ class Adapter(BaseAdapter):
                 to_user_id=to_user_id,
                 context_token=data.get("context_token"),
                 segments=message_list,
+                bot_agent=self.claweixin_config.claweixin_bot_agent,
+                route_tag=self.claweixin_config.claweixin_route_tag or None,
             )
 
             typing_ticket = self.typing_ticket_cache.get(to_user_id, "")
@@ -227,6 +261,8 @@ class Adapter(BaseAdapter):
                         api_root=api_root,
                         token=token,
                         body={"ilink_user_id": to_user_id, "typing_ticket": typing_ticket, "status": 2},
+                        bot_agent=self.claweixin_config.claweixin_bot_agent,
+                        route_tag=self.claweixin_config.claweixin_route_tag or None,
                     )
                 )
             return {"message_id": result}

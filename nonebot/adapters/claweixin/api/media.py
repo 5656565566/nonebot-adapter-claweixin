@@ -53,7 +53,7 @@ async def download_media_from_item(
             "image/tiff": ".tiff",
             "image/pcx": ".pcx",
         }.get(mime_type, ".bin")
-        file_id = hashlib.md5(payload).hexdigest()
+        file_id = hashlib.md5(payload, usedforsecurity=False).hexdigest()
         result.file_name = f"image-{file_id}{suffix}"
         result.media_data = payload
         result.media_type = mime_type
@@ -67,7 +67,7 @@ async def download_media_from_item(
         if not encrypted_query_param or not aes_key:
             return result
         payload = await download_and_decrypt_buffer(driver, str(encrypted_query_param), str(aes_key), cdn_base_url)
-        file_id = hashlib.md5(payload).hexdigest()
+        file_id = hashlib.md5(payload, usedforsecurity=False).hexdigest()
         result.file_name = f"{file_id}.silk"
         result.media_data = payload
         result.media_type = "audio/silk"
@@ -107,7 +107,7 @@ async def download_media_from_item(
         }.get(mime_type)
         if suffix is None:
             suffix = ".bin"
-        file_id = hashlib.md5(payload).hexdigest()
+        file_id = hashlib.md5(payload, usedforsecurity=False).hexdigest()
         result.file_name = f"{file_id}{suffix}"
         result.media_data = payload
         result.media_type = mime_type
@@ -121,7 +121,7 @@ async def download_media_from_item(
         if not encrypted_query_param or not aes_key:
             return result
         payload = await download_and_decrypt_buffer(driver, str(encrypted_query_param), str(aes_key), cdn_base_url)
-        file_id = hashlib.md5(payload).hexdigest()
+        file_id = hashlib.md5(payload, usedforsecurity=False).hexdigest()
         result.file_name = f"{file_id}.mp4"
         result.media_data = payload
         result.media_type = "video/mp4"

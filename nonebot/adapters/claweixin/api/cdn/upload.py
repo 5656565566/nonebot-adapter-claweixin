@@ -25,19 +25,27 @@ async def upload_buffer_to_cdn(
     driver: HTTPClientMixin,
     *,
     payload: bytes,
-    upload_param: str,
+    upload_param: str | None = None,
+    upload_full_url: str | None = None,
     filekey: str,
     cdn_base_url: str,
     aes_key: bytes,
 ) -> str:
     encrypted = aes_ecb_encrypt(payload, aes_key)
-    base = cdn_base_url.rstrip("/")
-    request = Request(
-        method="POST",
-        url=(
+    if upload_full_url and upload_full_url.strip():
+        url = upload_full_url.strip()
+    elif upload_param:
+        base = cdn_base_url.rstrip("/")
+        url = (
             f"{base}/upload?encrypted_query_param={quote(upload_param, safe='')}"
             f"&filekey={quote(filekey, safe='')}"
-        ),
+        )
+    else:
+        raise NetworkError("cdn upload url missing upload_full_url or upload_param")
+
+    request = Request(
+        method="POST",
+        url=url,
         headers={"Content-Type": "application/octet-stream"},
         content=encrypted,
         timeout=60.0,
@@ -63,10 +71,12 @@ async def upload_media_to_cdn(
     payload: bytes,
     to_user_id: str,
     media_type: int,
+    bot_agent: str | None = None,
+    route_tag: str | None = None,
 ) -> UploadedFileInfo:
     plaintext = payload
     rawsize = len(plaintext)
-    rawfilemd5 = hashlib.md5(plaintext).hexdigest()
+    rawfilemd5 = hashlib.md5(plaintext, usedforsecurity=False).hexdigest()
     filesize = aes_ecb_padded_size(rawsize)
     filekey = secrets.token_hex(16)
     aes_key = os.urandom(16)
@@ -85,15 +95,19 @@ async def upload_media_to_cdn(
             "no_need_thumb": True,
             "aeskey": aes_key.hex(),
         },
+        bot_agent=bot_agent,
+        route_tag=route_tag,
     )
     upload_param: Optional[str] = upload_url_resp.get("upload_param")
-    if not upload_param:
-        raise ValueError("getuploadurl response missing upload_param")
+    upload_full_url: Optional[str] = upload_url_resp.get("upload_full_url")
+    if not upload_param and not upload_full_url:
+        raise ValueError("getuploadurl response missing upload_full_url or upload_param")
 
     download_param = await upload_buffer_to_cdn(
         driver,
         payload=plaintext,
         upload_param=upload_param,
+        upload_full_url=upload_full_url,
         filekey=filekey,
         cdn_base_url=cdn_base_url,
         aes_key=aes_key,

@@ -8,6 +8,8 @@ class Config(BaseModel):
     claweixin_api_root: str = Field(default="https://ilinkai.weixin.qq.com")
     claweixin_cdn_root: str = Field(default="https://novac2c.cdn.weixin.qq.com/c2c")
     claweixin_login_qrcode_in_info: bool = Field(default=False)
+    claweixin_bot_agent: str = Field(default="nonebot-adapter-claweixin")
+    claweixin_route_tag: str = Field(default="")
 
     @field_validator("claweixin_token", mode="before")
     @classmethod
