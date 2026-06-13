@@ -29,8 +29,8 @@ DRIVER=~httpx
 
 ### 配置机器人
 
-*可选依赖 nonebot-adapter-claweixin[qrcode] 用于终端中显示二维码*
-*可选依赖 nonebot-adapter-claweixin[login] 用于完整登录流程*
+- *可选依赖 nonebot-adapter-claweixin[qrcode] 用于终端中显示二维码*
+- *可选依赖 nonebot-adapter-claweixin[login] 用于交互式登录流程*
 
 环境变量介绍：
 
